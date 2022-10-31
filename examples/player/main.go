@@ -15,8 +15,6 @@ import (
 )
 
 const (
-	width                             = 1280
-	height                            = 720
 	frameBufferSize                   = 1024
 	sampleRate                        = 44100
 	channelCount                      = 2
@@ -54,6 +52,13 @@ func readVideoAndAudio(media *reisen.Media) (<-chan *image.RGBA, <-chan [2]float
 		return nil, nil, nil, err
 	}
 
+	//gStream := media.GenericStreams()[0]
+	//err = gStream.Open()
+
+	//if err != nil {
+	//	return nil, nil, nil, err
+	//}
+
 	/*err = media.Streams()[0].Rewind(60 * time.Second)
 
 	if err != nil {
@@ -83,6 +88,16 @@ func readVideoAndAudio(media *reisen.Media) (<-chan *image.RGBA, <-chan [2]float
 			/*hash := sha256.Sum256(packet.Data())
 			fmt.Println(base58.Encode(hash[:]))*/
 
+			if packet.Type() != reisen.StreamVideo && packet.Type() != reisen.StreamAudio {
+				fmt.Println("Unk packet type skipped")
+				//fmt.Printf("Data: <%T> %s\n", packet.Data(), packet.Data())
+				err := reisen.DecodeGoproData(packet.Data())
+				if err != nil {
+					fmt.Printf("Decode error %v", err)
+					continue
+				}
+				continue
+			}
 			switch packet.Type() {
 			case reisen.StreamVideo:
 				s := media.Streams()[packet.StreamIndex()].(*reisen.VideoStream)
@@ -208,6 +223,8 @@ type Game struct {
 	perSecond              <-chan time.Time
 	last                   time.Time
 	deltaTime              float64
+	Width                  int
+	Height                 int
 }
 
 // Strarts reading samples and frames
@@ -221,20 +238,14 @@ func (game *Game) Start(fname string) error {
 		return err
 	}
 
-	// Sprite for drawing video frames.
-	game.videoSprite, err = ebiten.NewImage(
-		width, height, ebiten.FilterDefault)
-
-	if err != nil {
-		return err
-	}
-
 	// Open the media file.
 	media, err := reisen.NewMedia(fname)
 
 	if err != nil {
 		return err
 	}
+
+	videoStream := media.VideoStreams()[0]
 
 	// Get the FPS for playing
 	// video frames.
@@ -257,6 +268,19 @@ func (game *Game) Start(fname string) error {
 	var sampleSource <-chan [2]float64
 	game.frameBuffer, sampleSource,
 		game.errs, err = readVideoAndAudio(media)
+
+	if err != nil {
+		return err
+	}
+
+	// Now that decoding has started, we can get width and height of the video stream.
+	game.Width = videoStream.Width()
+	game.Height = videoStream.Height()
+
+	ebiten.SetWindowSize(game.Width, game.Height)
+	// Sprite for drawing video frames.
+	game.videoSprite, err = ebiten.NewImage(
+		game.Width, game.Height, ebiten.FilterDefault)
 
 	if err != nil {
 		return err
@@ -333,7 +357,7 @@ func (game *Game) Update(screen *ebiten.Image) error {
 }
 
 func (game *Game) Layout(a, b int) (int, int) {
-	return width, height
+	return game.Width, game.Height
 }
 
 func main() {
@@ -341,7 +365,6 @@ func main() {
 	err := game.Start("demo.mp4")
 	handleError(err)
 
-	ebiten.SetWindowSize(width, height)
 	ebiten.SetWindowTitle("Video")
 	err = ebiten.RunGame(game)
 	handleError(err)

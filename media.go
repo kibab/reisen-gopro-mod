@@ -63,6 +63,19 @@ func (media *Media) AudioStreams() []*AudioStream {
 	return audioStreams
 }
 
+// GenericStreams returns all the
+// generic streams of the media file.
+func (media *Media) GenericStreams() []*GenericStream {
+	genericStreams := []*GenericStream{}
+
+	for _, stream := range media.streams {
+		if genericStream, ok := stream.(*GenericStream); ok {
+			genericStreams = append(genericStreams, genericStream)
+		}
+	}
+
+	return genericStreams
+}
 // Duration returns the overall duration
 // of the media file.
 func (media *Media) Duration() (time.Duration, error) {
@@ -119,8 +132,8 @@ func (media *Media) findStreams() error {
 		codec := C.avcodec_find_decoder(codecParams.codec_id)
 
 		if codec == nil {
-			return fmt.Errorf(
-				"couldn't find codec by ID = %d",
+			fmt.Printf(
+				"couldn't find codec by ID = %d\n",
 				codecParams.codec_id)
 		}
 
@@ -143,8 +156,20 @@ func (media *Media) findStreams() error {
 
 			streams = append(streams, audioStream)
 
+		case C.AVMEDIA_TYPE_DATA:
+			fmt.Printf(" tag: 0x%x\n", codecParams.codec_tag)
+			gStream := new(GenericStream)
+			gStream.inner = innerStream
+			gStream.codecParams = codecParams
+			if codecParams.codec_tag == 0x646d7067 {
+				gStream.codec = gpmdCodec
+			} else {
+				gStream.codec = unknownDataCodec
+			}
+			gStream.media = media
+			streams = append(streams, gStream)
 		default:
-			return fmt.Errorf("unknown stream type")
+			fmt.Printf("unknown stream type %d\n", codecParams.codec_type)
 		}
 	}
 

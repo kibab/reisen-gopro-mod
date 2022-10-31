@@ -21,6 +21,8 @@ const (
 	StreamVideo StreamType = C.AVMEDIA_TYPE_VIDEO
 	// StreamAudio denotes the stream keeping audio frames.
 	StreamAudio StreamType = C.AVMEDIA_TYPE_AUDIO
+	// StreamData is a data stream with arbitrary data.
+	StreamData StreamType = C.AVMEDIA_TYPE_DATA
 )
 
 // String returns the string representation of
@@ -32,6 +34,9 @@ func (streamType StreamType) String() string {
 
 	case StreamAudio:
 		return "audio"
+
+	case StreamData:
+		return "data"
 
 	default:
 		return ""
@@ -345,6 +350,9 @@ func (stream *baseStream) filterOut() *C.AVPacket {
 
 // open opens the stream for decoding.
 func (stream *baseStream) open() error {
+	if stream.Type() == StreamData {
+		return nil
+	}
 	stream.codecCtx = C.avcodec_alloc_context3(stream.codec)
 
 	if stream.codecCtx == nil {

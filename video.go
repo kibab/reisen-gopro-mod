@@ -20,6 +20,8 @@ type VideoStream struct {
 	swsCtx    *C.struct_SwsContext
 	rgbaFrame *C.AVFrame
 	bufSize   C.int
+	width     int
+	height    int
 }
 
 // AspectRatio returns the fraction of the video
@@ -32,13 +34,13 @@ func (video *VideoStream) AspectRatio() (int, int) {
 // Width returns the width of the video
 // stream frame.
 func (video *VideoStream) Width() int {
-	return int(video.codecParams.width)
+	return video.width
 }
 
 // Height returns the height of the video
 // stream frame.
 func (video *VideoStream) Height() int {
-	return int(video.codecParams.height)
+	return video.height
 }
 
 // OpenDecode opens the video stream for
@@ -100,6 +102,9 @@ func (video *VideoStream) OpenDecode(width, height int, alg InterpolationAlgorit
 		return fmt.Errorf(
 			"couldn't create an SWS context")
 	}
+
+	video.width = width
+	video.height = height
 
 	return nil
 }
