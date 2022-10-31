@@ -1,6 +1,6 @@
 package reisen
 
-// #cgo LDFLAGS: -lavformat -lavcodec -lavutil -lswscale
+// #cgo pkg-config: libavformat libavcodec libavutil libswscale
 // #include <libavcodec/avcodec.h>
 // #include <libavformat/avformat.h>
 // #include <libavutil/avconfig.h>
@@ -76,6 +76,7 @@ func (media *Media) GenericStreams() []*GenericStream {
 
 	return genericStreams
 }
+
 // Duration returns the overall duration
 // of the media file.
 func (media *Media) Duration() (time.Duration, error) {
