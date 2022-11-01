@@ -65,11 +65,11 @@ func (media *Media) AudioStreams() []*AudioStream {
 
 // GenericStreams returns all the
 // generic streams of the media file.
-func (media *Media) GenericStreams() []*GenericStream {
-	genericStreams := []*GenericStream{}
+func (media *Media) GenericStreams() []*DataStream {
+	genericStreams := []*DataStream{}
 
 	for _, stream := range media.streams {
-		if genericStream, ok := stream.(*GenericStream); ok {
+		if genericStream, ok := stream.(*DataStream); ok {
 			genericStreams = append(genericStreams, genericStream)
 		}
 	}
@@ -158,15 +158,11 @@ func (media *Media) findStreams() error {
 			streams = append(streams, audioStream)
 
 		case C.AVMEDIA_TYPE_DATA:
-			fmt.Printf(" tag: 0x%x\n", codecParams.codec_tag)
-			gStream := new(GenericStream)
+			gStream := new(DataStream)
 			gStream.inner = innerStream
 			gStream.codecParams = codecParams
-			if codecParams.codec_tag == 0x646d7067 {
-				gStream.codec = gpmdCodec
-			} else {
-				gStream.codec = unknownDataCodec
-			}
+			gStream.nativeCodec = DataCodecByTag(int(codecParams.codec_tag))
+			gStream.codec = gStream.nativeCodec.FFMPEGCodec()
 			gStream.media = media
 			streams = append(streams, gStream)
 		default:
