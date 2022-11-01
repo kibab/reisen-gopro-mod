@@ -350,9 +350,6 @@ func (stream *baseStream) filterOut() *C.AVPacket {
 
 // open opens the stream for decoding.
 func (stream *baseStream) open() error {
-	if stream.Type() == StreamData {
-		return nil
-	}
 	stream.codecCtx = C.avcodec_alloc_context3(stream.codec)
 
 	if stream.codecCtx == nil {
