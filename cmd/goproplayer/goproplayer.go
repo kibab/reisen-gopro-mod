@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"image"
+	"os"
 	"time"
 
 	"github.com/faiface/beep"
@@ -16,12 +17,14 @@ import (
 
 const (
 	frameBufferSize                   = 1024 * 1024
-	sampleRate                        = 44100
+	sampleRate                        = 48000
 	channelCount                      = 2
 	bitDepth                          = 8
 	sampleBufferSize                  = 32 * channelCount * bitDepth * 1024 * 1000
-	SpeakerSampleRate beep.SampleRate = 44100
+	SpeakerSampleRate beep.SampleRate = 48000
 )
+
+var totalVideoDecoded = 0
 
 type videoWithSync struct {
 	imgData *image.RGBA
@@ -58,16 +61,29 @@ func readVideoAndAudio(media *reisen.Media) (<-chan videoWithSync, <-chan [2]flo
 		return nil, nil, nil, nil, err
 	}
 
+	// Display some decoding statistics
+	stopStat := false
+	go func() {
+		oldDecoded := 0
+		for {
+			dt := totalVideoDecoded - oldDecoded
+			fmt.Printf("Decoded video frames: %d (%d FPS)\n", totalVideoDecoded, dt)
+			oldDecoded = totalVideoDecoded
+			time.Sleep(1 * time.Second)
+			if stopStat {
+				return
+			}
+		}
+	}()
+
 	go func() {
 		fmt.Println("*** START DECODER ***")
-		numPkt := 0
 		for {
 			packet, gotPacket, err := media.ReadPacket()
-			numPkt++
-			fmt.Printf("*** READ PACKET %d ***\n", numPkt)
 
 			if err != nil {
 				go func(err error) {
+					fmt.Printf("media.ReadPacket: Error to the chan: %v\n", err)
 					errs <- err
 				}(err)
 			}
@@ -83,7 +99,8 @@ func readVideoAndAudio(media *reisen.Media) (<-chan videoWithSync, <-chan [2]flo
 
 				if err != nil {
 					go func(err error) {
-						errs <- err
+						fmt.Printf("StreamVideo: Error to the chan: %v (supressed)\n", err)
+						//errs <- err
 					}(err)
 				}
 
@@ -94,8 +111,12 @@ func readVideoAndAudio(media *reisen.Media) (<-chan videoWithSync, <-chan [2]flo
 				if videoFrame == nil {
 					continue
 				}
+				totalVideoDecoded++
 
-				frameBuffer <- videoWithSync{imgData: videoFrame.Image(), pts: videoFrame.PresentationOffsetOrDie()}
+				frameBuffer <- videoWithSync{
+					imgData: videoFrame.Image(),
+					pts:     videoFrame.PresentationOffsetOrDie(),
+				}
 
 			case reisen.StreamAudio:
 				s := media.Streams()[packet.StreamIndex()].(*reisen.AudioStream)
@@ -103,7 +124,8 @@ func readVideoAndAudio(media *reisen.Media) (<-chan videoWithSync, <-chan [2]flo
 
 				if err != nil {
 					go func(err error) {
-						errs <- err
+						fmt.Printf("StreamAudio.1: Error to the chan: %v (supressed)\n", err)
+						//errs <- err
 					}(err)
 				}
 
@@ -128,6 +150,7 @@ func readVideoAndAudio(media *reisen.Media) (<-chan videoWithSync, <-chan [2]flo
 
 					if err != nil {
 						go func(err error) {
+							fmt.Printf("StreamAudio.2: Error to the chan: %v\n", err)
 							errs <- err
 						}(err)
 					}
@@ -138,6 +161,7 @@ func readVideoAndAudio(media *reisen.Media) (<-chan videoWithSync, <-chan [2]flo
 
 					if err != nil {
 						go func(err error) {
+							fmt.Printf("StreamAudio.3: Error to the chan: %v\n", err)
 							errs <- err
 						}(err)
 					}
@@ -151,6 +175,7 @@ func readVideoAndAudio(media *reisen.Media) (<-chan videoWithSync, <-chan [2]flo
 
 				if err != nil {
 					go func(err error) {
+						fmt.Printf("StreamData: Error to the chan: %v\n", err)
 						errs <- err
 					}(err)
 				}
@@ -170,6 +195,7 @@ func readVideoAndAudio(media *reisen.Media) (<-chan videoWithSync, <-chan [2]flo
 			}
 		}
 		fmt.Println("=========== FINISH DECODING DATA ===================")
+		stopStat = true
 		videoStream.Close()
 		audioStream.Close()
 		media.CloseDecode()
@@ -177,7 +203,6 @@ func readVideoAndAudio(media *reisen.Media) (<-chan videoWithSync, <-chan [2]flo
 		close(sampleBuffer)
 		close(dataFrame)
 		close(errs)
-		fmt.Println("=========== QUIT DECODING DATA ===================")
 	}()
 	return frameBuffer, sampleBuffer, dataFrame, errs, nil
 }
@@ -261,13 +286,16 @@ func (game *Game) Start(fname string) error {
 	}
 
 	// SPF for frame ticker.
-	spf := 1.0 / float64(videoFPS)
+
+	spf := 1.0 / float64(videoFPS) * 1000
 	frameDuration, err := time.
 		ParseDuration(fmt.Sprintf("%fs", spf))
 
 	if err != nil {
 		return err
 	}
+
+	fmt.Printf("Video FPS: %d, frame duration: %v\n", videoFPS, frameDuration)
 
 	// Start decoding streams.
 	var sampleSource <-chan [2]float64
@@ -279,7 +307,7 @@ func (game *Game) Start(fname string) error {
 		return err
 	}
 
-	time.Sleep(20 * time.Second)
+	time.Sleep(1 * time.Second)
 	fmt.Println("START WITH THE REST OF THE PLAYBACK")
 	// Now that decoding has started, we can get width and height of the video stream.
 	game.Width = videoStream.Width()
@@ -296,6 +324,34 @@ func (game *Game) Start(fname string) error {
 
 	// Start playing audio samples.
 	speaker.Play(streamSamples(sampleSource))
+
+	// Start receiving data frames with telemetry and sync them to the video stream.
+	go func(game *Game) {
+		for {
+			// Sync to video
+			if game.lastDataPts > game.lastVideoPts {
+				fmt.Printf(".")
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
+			df, ok := <-game.data
+			if ok {
+				game.lastDataPts = df.PresentationOffsetOrDie()
+				game.lastData = df
+				// Accuracy can indicate the camera doesn't actually have a correct location.
+				// In this case, the GPS data will point to some location where camera had
+				// a good reception / GPS fix. This can be thousands of kilometers away from the
+				// real location.
+				if df.Telemetry().Accuracy < 9000 {
+					fmt.Printf("\n\nGPS: Accuracy %.0fm, https://www.google.com/maps/search/?api=1&query=%f,%f\n\n", df.Telemetry().Accuracy/100, df.Telemetry().Lat, df.Telemetry().Long)
+				} else {
+					fmt.Printf("\n\nGPS: Accuracy too coarse (try https://www.google.com/maps/search/?api=1&query=%f,%f)\n\n", df.Telemetry().Lat, df.Telemetry().Long)
+				}
+			} else {
+				return
+			}
+		}
+	}(game)
 
 	game.ticker = time.Tick(frameDuration)
 
@@ -318,29 +374,12 @@ func (game *Game) Update(screen *ebiten.Image) error {
 	select {
 	case err, ok := <-game.errs:
 		if ok {
+			fmt.Printf("Error in the chan: %v", err)
 			return err
 		}
 
 	default:
 	}
-
-	go func(game *Game) {
-		for {
-			// Sync to video
-			if game.lastDataPts > game.lastVideoPts {
-				//fmt.Printf("There is more data in queue, but its time is not up yet\n")
-				time.Sleep(time.Second / 2)
-			}
-			df, ok := <-game.data
-			if ok {
-				game.lastDataPts = df.PresentationOffsetOrDie()
-				game.lastData = df
-				fmt.Printf("\n\nhttp://maps.google.com/?ie=UTF8&hq=&ll=%f,%f&z=13\n\n", df.Telemetry().Lat, df.Telemetry().Long)
-			} else {
-				return
-			}
-		}
-	}(game)
 
 	// Read video frames and draw them.
 	select {
@@ -371,8 +410,8 @@ func (game *Game) Update(screen *ebiten.Image) error {
 	// Update metrics in the window title.
 	select {
 	case <-game.perSecond:
-		ebiten.SetWindowTitle(fmt.Sprintf("%s | FPS: %d | dt: %f | Frames: %d | Video FPS: %d",
-			"Video", game.fps, game.deltaTime, game.videoTotalFramesPlayed, game.videoPlaybackFPS))
+		ebiten.SetWindowTitle(fmt.Sprintf("%s | FPS: %d | dt: %f | Frames: %d | Decoded Frames: %d | Video FPS: %d",
+			"Video", game.fps, game.deltaTime, game.videoTotalFramesPlayed, totalVideoDecoded, game.videoPlaybackFPS))
 
 		game.fps = 0
 		game.videoPlaybackFPS = 0
@@ -389,7 +428,7 @@ func (game *Game) Layout(a, b int) (int, int) {
 
 func main() {
 	game := &Game{}
-	err := game.Start("demo.mp4")
+	err := game.Start(os.Args[1])
 	handleError(err)
 
 	ebiten.SetWindowTitle("Video")
