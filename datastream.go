@@ -4,7 +4,11 @@ package reisen
 // #include <libavcodec/avcodec.h>
 import "C"
 import (
+	"bytes"
 	"fmt"
+	"io"
+
+	"github.com/kibab/gopro-utils/telemetry"
 )
 
 // There are no implementations for data stream codecs in FFMPeg library.
@@ -12,12 +16,12 @@ import (
 // All other data streams are assigned to a "generic" data codec that
 // doesn't do anything.
 const (
-	gpmdCodecTag int = 0x646d7067
+	gpmdCodecTag int = 0x646d7067 // 'gmpd' in little-engian
 )
 
 type NativeCodec struct {
 	ffmpegCodec *C.AVCodec
-	handler     func(*Packet)
+	handler     func(*DataStream, *Packet) (Frame, bool)
 }
 
 func (nc *NativeCodec) FFMPEGCodec() *C.AVCodec {
@@ -29,27 +33,37 @@ type DataStream struct {
 	nativeCodec NativeCodec
 }
 
+// Parsed data from GPMD packet
+type TelemetryData struct {
+	Lat, Long float64
+}
+
 // DataFrame is a data frame
 // obtained from an data stream.
 type DataFrame struct {
 	baseFrame
-	data []byte
+	data  []byte
+	tData TelemetryData
 }
 
 // Data returns a raw slice of
-// audio frame samples.
+// data frame samples.
 func (frame *DataFrame) Data() []byte {
 	return frame.data
 }
 
+func (frame *DataFrame) Telemetry() TelemetryData {
+	return frame.tData
+}
+
 // newDataFrame returns a newly created data frame.
-func newDataFrame(stream Stream, pts int64, data []byte) *DataFrame {
+func newDataFrame(stream Stream, pts int64, data []byte, telemetryData TelemetryData) *DataFrame {
 	frame := new(DataFrame)
 
 	frame.stream = stream
 	frame.pts = pts
 	frame.data = data
-
+	frame.tData = telemetryData
 	return frame
 }
 
@@ -96,22 +110,45 @@ func (gs *DataStream) Open() error {
 
 // ReadFrame reads the next frame from the stream.
 func (gs *DataStream) ReadFrame() (Frame, bool, error) {
-	fmt.Printf("DataStream (codec %s) ReadFrame() called\n", gs.CodecName())
 	pkt := newPacket(gs.media, gs.media.packet)
-	gs.nativeCodec.handler(pkt)
-	frame := newDataFrame(gs, pkt.pts, pkt.Data())
+	frame, handled := gs.nativeCodec.handler(gs, pkt)
+	if !handled {
+		return nil, false, nil
+	}
 	return frame, true, nil
 }
 
-func gmpdFrameHandler(pkt *Packet) {
-	fmt.Printf("About to decode GPMD data w/ size %d, pts %d\n", len(pkt.Data()), pkt.pts)
-	if err := DecodeGoproData(pkt.Data()); err != nil {
-		fmt.Printf("cannot handle packet: %v", err)
+func gmpdFrameHandler(gs *DataStream, pkt *Packet) (Frame, bool) {
+	tdata := TelemetryData{
+		Lat:  21,
+		Long: 11,
 	}
+	return newDataFrame(gs, pkt.pts, pkt.Data(), tdata), true
+
+	r := bytes.NewReader(pkt.Data())
+	for {
+		telem, err := telemetry.Read(r)
+		if telem != nil && telem.Gps != nil {
+			tdata := TelemetryData{
+				Lat:  telem.Gps[0].Latitude,
+				Long: telem.Gps[0].Longitude,
+			}
+			return newDataFrame(gs, pkt.pts, pkt.Data(), tdata), true
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			fmt.Printf("Telemetry read err: %v", err)
+			return nil, false
+		}
+	}
+	return nil, false
 }
 
-func genericFrameHandler(pkt *Packet) {
+func genericFrameHandler(gs *DataStream, pkt *Packet) (Frame, bool) {
 	/* Do nothing */
+	return nil, false
 }
 
 // Close closes the stream and

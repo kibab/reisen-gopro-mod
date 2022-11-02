@@ -9,6 +9,7 @@ import (
 type Frame interface {
 	Data() []byte
 	PresentationOffset() (time.Duration, error)
+	PresentationOffsetOrDie() time.Duration
 }
 
 // baseFrame contains the information
@@ -29,6 +30,18 @@ func (frame *baseFrame) PresentationOffset() (time.Duration, error) {
 	tm := float64(frame.pts) * tb
 
 	return time.ParseDuration(fmt.Sprintf("%fs", tm))
+}
+
+// PresentationOffsetOrDie is a more convenient function for
+// obtaining the presentation offset. It allows to obtain
+// a presentation offset in one call, at the cost of possible
+// catastrophic failure of the application.
+func (frame *baseFrame) PresentationOffsetOrDie() time.Duration {
+	ts, err := frame.PresentationOffset()
+	if err != nil {
+		panic(err)
+	}
+	return ts
 }
 
 // IndexCoded returns the index of
