@@ -36,6 +36,7 @@ type DataStream struct {
 // Parsed data from GPMD packet
 type TelemetryData struct {
 	Lat, Long float64
+	Accuracy  float64
 }
 
 // DataFrame is a data frame
@@ -119,19 +120,16 @@ func (gs *DataStream) ReadFrame() (Frame, bool, error) {
 }
 
 func gmpdFrameHandler(gs *DataStream, pkt *Packet) (Frame, bool) {
-	tdata := TelemetryData{
-		Lat:  21,
-		Long: 11,
-	}
-	return newDataFrame(gs, pkt.pts, pkt.Data(), tdata), true
-
+	// TODO(kibab): it probably makes sense to rewrite the code in telemetry
+	// module altogether, because in unmodified form it skips the whole data block.
 	r := bytes.NewReader(pkt.Data())
 	for {
 		telem, err := telemetry.Read(r)
 		if telem != nil && telem.Gps != nil {
 			tdata := TelemetryData{
-				Lat:  telem.Gps[0].Latitude,
-				Long: telem.Gps[0].Longitude,
+				Lat:      telem.Gps[0].Latitude,
+				Long:     telem.Gps[0].Longitude,
+				Accuracy: telem.GpsAccuracy.Accuracy,
 			}
 			return newDataFrame(gs, pkt.pts, pkt.Data(), tdata), true
 		}
