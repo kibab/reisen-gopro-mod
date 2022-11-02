@@ -52,13 +52,6 @@ func readVideoAndAudio(media *reisen.Media) (<-chan *image.RGBA, <-chan [2]float
 		return nil, nil, nil, err
 	}
 
-	//gStream := media.GenericStreams()[0]
-	//err = gStream.Open()
-
-	//if err != nil {
-	//	return nil, nil, nil, err
-	//}
-
 	/*err = media.Streams()[0].Rewind(60 * time.Second)
 
 	if err != nil {
@@ -88,16 +81,6 @@ func readVideoAndAudio(media *reisen.Media) (<-chan *image.RGBA, <-chan [2]float
 			/*hash := sha256.Sum256(packet.Data())
 			fmt.Println(base58.Encode(hash[:]))*/
 
-			if packet.Type() != reisen.StreamVideo && packet.Type() != reisen.StreamAudio {
-				fmt.Println("Unk packet type skipped")
-				//fmt.Printf("Data: <%T> %s\n", packet.Data(), packet.Data())
-				err := reisen.DecodeGoproData(packet.Data())
-				if err != nil {
-					fmt.Printf("Decode error %v", err)
-					continue
-				}
-				continue
-			}
 			switch packet.Type() {
 			case reisen.StreamVideo:
 				s := media.Streams()[packet.StreamIndex()].(*reisen.VideoStream)
@@ -117,6 +100,11 @@ func readVideoAndAudio(media *reisen.Media) (<-chan *image.RGBA, <-chan [2]float
 					continue
 				}
 
+				off, err := videoFrame.PresentationOffset()
+				if err != nil {
+					fmt.Printf("Error while obtining presentation offset: %v\n", err)
+				}
+				fmt.Printf("VideoFrame TS = %d\n", off)
 				frameBuffer <- videoFrame.Image()
 
 			case reisen.StreamAudio:
@@ -167,6 +155,28 @@ func readVideoAndAudio(media *reisen.Media) (<-chan *image.RGBA, <-chan [2]float
 					sample[1] = result
 					sampleBuffer <- sample
 				}
+			case reisen.StreamData:
+				s := media.Streams()[packet.StreamIndex()].(*reisen.DataStream)
+				dataFrame, gotFrame, err := s.ReadFrame()
+
+				if err != nil {
+					go func(err error) {
+						errs <- err
+					}(err)
+				}
+
+				if !gotFrame {
+					break
+				}
+
+				if dataFrame == nil {
+					continue
+				}
+				off, err := dataFrame.PresentationOffset()
+				if err != nil {
+					fmt.Printf("Error while obtining presentation offset: %v\n", err)
+				}
+				fmt.Printf("DataFrame TS = %d\n", off)
 			}
 		}
 
