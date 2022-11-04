@@ -61,6 +61,14 @@ func readVideoAndAudio(media *reisen.Media) (<-chan videoWithSync, <-chan [2]flo
 		return nil, nil, nil, nil, err
 	}
 
+	gmpdDataStream := media.DataStreamsByCodecTag(reisen.GpmdCodecTag)[0]
+	err = gmpdDataStream.Open()
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	fmt.Printf("# of streams: %d\n", len(media.Streams()))
+
 	// Display some decoding statistics
 	stopStat := false
 	go func() {
