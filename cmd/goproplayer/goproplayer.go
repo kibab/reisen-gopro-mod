@@ -342,7 +342,9 @@ func (game *Game) Start(fname string) error {
 				// In this case, the GPS data will point to some location where camera had
 				// a good reception / GPS fix. This can be thousands of kilometers away from the
 				// real location.
-				if df.Telemetry().Accuracy < 9000 {
+				// "Accuracy" is "GPS Dilution of Precision", under 500 is good:
+				// https://github.com/gopro/gpmf-parser#hero5-black-with-gps-enabled-adds
+				if df.Telemetry().Accuracy < 500 {
 					fmt.Printf("\n\nGPS: Accuracy %.0fm, https://www.google.com/maps/search/?api=1&query=%f,%f\n\n", df.Telemetry().Accuracy/100, df.Telemetry().Lat, df.Telemetry().Long)
 				} else {
 					fmt.Printf("\n\nGPS: Accuracy too coarse (try https://www.google.com/maps/search/?api=1&query=%f,%f)\n\n", df.Telemetry().Lat, df.Telemetry().Long)
@@ -427,6 +429,10 @@ func (game *Game) Layout(a, b int) (int, int) {
 }
 
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: goproplayer file")
+		os.Exit(1)
+	}
 	game := &Game{}
 	err := game.Start(os.Args[1])
 	handleError(err)
