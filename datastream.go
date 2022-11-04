@@ -16,7 +16,7 @@ import (
 // All other data streams are assigned to a "generic" data codec that
 // doesn't do anything.
 const (
-	gpmdCodecTag int = 0x646d7067 // 'gmpd' in little-engian
+	GpmdCodecTag int = 0x646d7067 // 'gmpd' in little-engian
 )
 
 type NativeCodec struct {
@@ -31,6 +31,8 @@ func (nc *NativeCodec) FFMPEGCodec() *C.AVCodec {
 type DataStream struct {
 	baseStream
 	nativeCodec NativeCodec
+	isOpened    bool
+	contents    bytes.Buffer
 }
 
 // Parsed data from GPMD packet
@@ -40,7 +42,7 @@ type TelemetryData struct {
 }
 
 // DataFrame is a data frame
-// obtained from an data stream.
+// obtained from a data stream.
 type DataFrame struct {
 	baseFrame
 	data  []byte
@@ -83,7 +85,7 @@ var tagToNativeCodec map[int]NativeCodec = map[int]NativeCodec{
 		ffmpegCodec: unknownDataCodec,
 		handler:     genericFrameHandler,
 	},
-	gpmdCodecTag: {
+	GpmdCodecTag: {
 		ffmpegCodec: gpmdCodec,
 		handler:     gmpdFrameHandler,
 	},
@@ -101,17 +103,31 @@ func DataCodecByTag(tag int) NativeCodec {
 	return nativeCodec
 }
 
+// CodecTag returns a codec tag.
+func (gs *DataStream) CodecTag() int {
+	return int(gs.baseStream.codecParams.codec_tag)
+}
+
 // Open opens the data stream to decode
 // frames and samples from it.
 // We don't call into baseStream.open here because we don't need to init
 // any FFMPeg structures.
 func (gs *DataStream) Open() error {
+	gs.contents = *bytes.NewBuffer([]byte{})
+	gs.isOpened = true
 	return nil
 }
 
 // ReadFrame reads the next frame from the stream.
 func (gs *DataStream) ReadFrame() (Frame, bool, error) {
+	// If this stream is not opened -- just report we have nothing.
+	// Reason not to panic is because we may have multiple data streams
+	// in MP4 file, and we are not interested in all of them.
+	if !gs.isOpened {
+		return nil, false, nil
+	}
 	pkt := newPacket(gs.media, gs.media.packet)
+	gs.contents.Write(pkt.Data())
 	frame, handled := gs.nativeCodec.handler(gs, pkt)
 	if !handled {
 		return nil, false, nil
@@ -120,12 +136,12 @@ func (gs *DataStream) ReadFrame() (Frame, bool, error) {
 }
 
 func gmpdFrameHandler(gs *DataStream, pkt *Packet) (Frame, bool) {
-	// TODO(kibab): it probably makes sense to rewrite the code in telemetry
-	// module altogether, because in unmodified form it skips the whole data block.
-	r := bytes.NewReader(pkt.Data())
 	for {
-		telem, err := telemetry.Read(r)
+		telem := &telemetry.TELEM{}
+		telem, err := telemetry.Read(telem, &gs.contents)
+
 		if telem != nil && telem.Gps != nil {
+			fmt.Printf("Number of GPS samples: %d\n", len(telem.Gps))
 			tdata := TelemetryData{
 				Lat:      telem.Gps[0].Latitude,
 				Long:     telem.Gps[0].Longitude,
@@ -152,5 +168,6 @@ func genericFrameHandler(gs *DataStream, pkt *Packet) (Frame, bool) {
 // Close closes the stream and
 // stops decoding frames.
 func (gs *DataStream) Close() error {
+	gs.contents.Truncate(0)
 	return nil
 }

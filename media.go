@@ -63,18 +63,19 @@ func (media *Media) AudioStreams() []*AudioStream {
 	return audioStreams
 }
 
-// GenericStreams returns all the
-// generic streams of the media file.
-func (media *Media) GenericStreams() []*DataStream {
-	genericStreams := []*DataStream{}
-
+// DataStreamByCodec returns all the
+// data streams of the media file.
+func (media *Media) DataStreamsByCodecTag(codecTag int) []*DataStream {
+	dataStreams := []*DataStream{}
 	for _, stream := range media.streams {
-		if genericStream, ok := stream.(*DataStream); ok {
-			genericStreams = append(genericStreams, genericStream)
+		if dataStream, ok := stream.(*DataStream); ok {
+			if dataStream.CodecTag() != codecTag {
+				continue
+			}
+			dataStreams = append(dataStreams, dataStream)
 		}
 	}
-
-	return genericStreams
+	return dataStreams
 }
 
 // Duration returns the overall duration
